@@ -1,0 +1,11 @@
+version: '3'
+services:
+  vnc:
+    build: .
+    container_name: vnc-container
+    ports:
+      - "5900:5900"
+    volumes:
+      - ./data:/home/docker/data
+    stdin_open: true
+    tty: true
