@@ -1,0 +1,184 @@
+Tuyệt vời 👍 Giờ mình tổng hợp lại thành một **plan hoàn chỉnh** từ đầu đến cuối (trên Windows PowerShell, theo yêu cầu “SSH vào rồi mới cài DE + VNC”), để bạn chạy một lần là xong:
+
+---
+
+# 🚀 Kế hoạch triển khai Desktop + VNC trong Docker
+
+## 1. Chuẩn bị
+
+* Windows cài **Docker Desktop** (Linux containers).
+* Có **PowerShell** và **SSH client** (`ssh -V` để kiểm tra; nếu thiếu: `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0`).
+* Cài **RealVNC Viewer** (hoặc TightVNC Viewer) trên Windows.
+
+---
+
+## 2. Tạo dự án
+
+Trong PowerShell:
+
+```powershell
+mkdir vnc-desktop; cd vnc-desktop
+```
+
+### Dockerfile (chỉ cài SSH server, không cài sẵn DE/VNC)
+
+```powershell
+@'
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Ho_Chi_Minh
+
+RUN apt-get update && apt-get install -y \
+    openssh-server sudo locales tzdata vim curl net-tools dbus-x11 \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /var/run/sshd
+
+RUN useradd -ms /bin/bash student \
+ && echo "student:student" | chpasswd \
+ && usermod -aG sudo student \
+ && sed -i 's/#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
+ && sed -i 's@session\s\+required\s\+pam_loginuid.so@session optional pam_loginuid.so@g' /etc/pam.d/sshd
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd","-D"]
+'@ | Set-Content -Path Dockerfile -Encoding UTF8
+```
+
+### docker-compose.yml
+
+```powershell
+@'
+version: "3.8"
+services:
+  desktop:
+    build: .
+    container_name: vnc-desktop
+    ports:
+      - "2222:22"     # SSH
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      - desktop-home:/home/student
+    restart: unless-stopped
+volumes:
+  desktop-home:
+'@ | Set-Content -Path docker-compose.yml -Encoding UTF8
+```
+
+---
+
+## 3. Build và chạy container
+
+```powershell
+docker compose up -d --build
+docker ps
+Test-NetConnection 127.0.0.1 -Port 2222
+```
+
+---
+
+## 4. SSH vào container
+
+```powershell
+ssh student@127.0.0.1 -p 2222
+# password: student
+```
+
+---
+
+## 5. Cài DE + VNC bên trong container
+
+Trong **shell Ubuntu** (sau khi SSH):
+
+```bash
+sudo apt update
+sudo apt install -y xfce4 xfce4-goodies tigervnc-standalone-server dbus-x11 xauth x11-xserver-utils xfonts-base
+```
+
+---
+
+## 6. Tạo mật khẩu VNC và file xstartup
+
+```bash
+mkdir -p ~/.vnc
+vncpasswd   # nhập mật khẩu (chỉ cần 1 loại, không cần view-only)
+
+cat > ~/.vnc/xstartup << 'EOF'
+#!/bin/sh
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+
+[ -f "$HOME/.Xresources" ] && xrdb "$HOME/.Xresources"
+
+exec dbus-launch --exit-with-session startxfce4
+EOF
+
+chmod 700 ~/.vnc
+chmod 600 ~/.vnc/passwd
+chmod +x ~/.vnc/xstartup
+```
+
+---
+
+## 7. Đảm bảo socket X11 đúng quyền
+
+```bash
+sudo mkdir -p /tmp/.X11-unix
+sudo chown root:root /tmp/.X11-unix
+sudo chmod 1777 /tmp/.X11-unix
+```
+
+---
+
+## 8. Khởi động VNC server
+
+```bash
+vncserver :1 -geometry 1366x768 -depth 24 -localhost yes
+```
+
+Kiểm tra:
+
+```bash
+ps -ef | grep Xtigervnc
+tail -n 50 ~/.vnc/*:1.log
+```
+
+---
+
+## 9. Tạo SSH tunnel từ Windows và kết nối RealVNC
+
+Trên Windows PowerShell (cửa sổ mới, giữ mở):
+
+```powershell
+ssh -N -L 5901:127.0.0.1:5901 -p 2222 student@127.0.0.1
+```
+
+Mở **RealVNC Viewer** → nhập `127.0.0.1:5901` → **Continue** → nhập mật khẩu VNC (đặt ở `vncpasswd`) → bạn sẽ thấy desktop **XFCE**.
+
+---
+
+## 10. Dừng khi xong
+
+Trong container:
+
+```bash
+vncserver -kill :1
+```
+
+Trên Windows:
+
+```powershell
+docker compose down
+```
+
+---
+
+✅ Với plan này, bạn chạy **đúng từ đầu**, container chỉ build với SSH, sau đó SSH vào rồi mới cài **XFCE + VNC**, config `xstartup` chuẩn → kết nối thành công qua RealVNC.
+
+---
+
+Bạn có muốn mình viết thêm **script tự động start VNC (dọn rác + run lại)** để bạn không phải gõ thủ công nhiều lệnh mỗi lần mở desktop không?
