@@ -1,11 +1,14 @@
-version: '3'
+version: "3.8"
 services:
-  vnc:
+  desktop:
     build: .
-    container_name: vnc-container
+    container_name: vnc-desktop
     ports:
-      - "5900:5900"
+      - "2222:22"     # SSH
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
     volumes:
-      - ./data:/home/docker/data
-    stdin_open: true
-    tty: true
+      - desktop-home:/home/student
+    restart: unless-stopped
+volumes:
+  desktop-home:
